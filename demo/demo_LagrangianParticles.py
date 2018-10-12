@@ -26,7 +26,7 @@ if comm.Get_rank() == 0:
 
 plt.ion()
 
-save = False
+save = True
 
 dt = 0.01
 for step in range(500):

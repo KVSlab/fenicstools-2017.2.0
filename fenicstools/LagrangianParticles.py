@@ -23,43 +23,6 @@ comm = pyMPI.COMM_WORLD
 # collisions tests return this value or -1 if there is no collision
 __UINT32_MAX__ = np.iinfo('uint32').max
 
-# restrict broken in 2018.1. Wrap here for now
-code="""
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
-#include <dolfin/function/Function.h>
-#include <dolfin/mesh/Cell.h>
-#include <dolfin/fem/FiniteElement.h>
-
-void restrict(const dolfin::Function& self,
-              const dolfin::FiniteElement& element,
-              const dolfin::Cell& cell,
-              std::vector<double>& w)
-{
-    ufc::cell ufc_cell;
-    cell.get_cell_data(ufc_cell);
-    std::vector<double> coordinate_dofs;
-    cell.get_coordinate_dofs(coordinate_dofs);
-    std::size_t s_dim = element.space_dimension();
-    self.restrict(w.data(), element, cell, coordinate_dofs.data(), ufc_cell);
-}
-
-namespace py = pybind11;
-
-PYBIND11_MODULE(SIGNATURE, m){
-    m.def("restrict", [](py::object v,
-                         const dolfin::FiniteElement& element,
-                         const dolfin::Cell& cell){
-        auto _v = v.attr("_cpp_object").cast<dolfin::Function&>();
-        std::vector<double> _w(element.space_dimension());
-        restrict(_v, element, cell, _w);
-        return _w;
-    });
-}
-"""
-compiled = df.compile_cpp_code(code)
-restrict = compiled.restrict
 
 class Particle:
     __slots__ = ['position', 'properties']
@@ -256,15 +219,19 @@ class LagrangianParticles:
         v_dim = self.element.value_dimension(0)
         for cwp in six.itervalues(self.particle_map):
             # Restrict once per cell
-            #self.coefficients = restrict(u, self.element, cwp.__class__.__base__)
-            self.coefficients = restrict(u, self.element, cwp)
+            u.restrict(self.coefficients,
+                       self.element,
+                       cwp,
+                       cwp.get_vertex_coordinates(),
+                       cwp)
             #print(self.coefficients)
             for particle in cwp.particles:
                 x = particle.position
                 # Compute velocity at position x
-                self.basis_matrix[:] = self.element.evaluate_basis_all(x,
+                self.element.evaluate_basis_all(self.basis_matrix,
+                                                x,
                                                 cwp.get_vertex_coordinates(),
-                                                cwp.orientation()).reshape((-1, v_dim))
+                                                cwp.orientation())
                 x[:] = x[:] + dt*np.dot(self.coefficients, self.basis_matrix)[:]
         # Recompute the map
         stop_shift = start.stop()
@@ -373,7 +340,7 @@ class LagrangianParticles:
             # Receive on master
             received = defaultdict(list)
             received[0] = [copy.copy(p.position)
-                           for cwp in p_map.itervalues()
+                           for cwp in iter(p_map.values())
                            for p in cwp.particles]
             for proc in self.other_processes:
                 # Receive all_particles[proc]
@@ -395,7 +362,7 @@ class LagrangianParticles:
                                label='%d' % proc,
                                c=scalarMap.to_rgba(proc),
                                edgecolor='none')
-            ax.legend(loc='best')
+            # ax.legend(loc='best')
             ax.axis([0, 1, 0, 1])
 
     def bar(self, fig):
@@ -467,7 +434,7 @@ class RandomGenerator(object):
 
 
             # Use rule to see which points are inside
-            points_inside = np.array(filter(self.rule, points))
+            points_inside = np.array(list(filter(self.rule, points)))
         else:
             points_inside = None
 
