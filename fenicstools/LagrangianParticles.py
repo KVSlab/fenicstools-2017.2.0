@@ -12,6 +12,7 @@ import dolfin as df
 import numpy as np
 import copy
 import six
+from six import itervalues
 from mpi4py import MPI as pyMPI
 from collections import defaultdict
 
@@ -340,7 +341,7 @@ class LagrangianParticles:
             # Receive on master
             received = defaultdict(list)
             received[0] = [copy.copy(p.position)
-                           for cwp in iter(p_map.values())
+                           for cwp in p_map.itervalues()
                            for p in cwp.particles]
             for proc in self.other_processes:
                 # Receive all_particles[proc]
